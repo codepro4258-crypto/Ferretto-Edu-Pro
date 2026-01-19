@@ -1,0 +1,269 @@
+/**
+ * CODE EDITOR MODULE
+ */
+
+let mainEditor = null;
+let materialEditor = null;
+
+/**
+ * Initialize main code editor
+ */
+function initMainEditor() {
+    if (typeof CodeMirror === 'undefined') {
+        console.error("CodeMirror library failed to load.");
+        return false;
+    }
+
+    const textarea = document.getElementById('codeEditor');
+    if (!textarea) return false;
+
+    mainEditor = CodeMirror.fromTextArea(textarea, {
+        mode: 'htmlmixed',
+        theme: 'monokai',
+        lineNumbers: true,
+        autoCloseTags: true,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        indentUnit: 4,
+        tabSize: 4,
+        lineWrapping: true
+    });
+
+    mainEditor.on('change', updatePreview);
+    
+    // Set default code
+    const defaultCode = `<!DOCTYPE html>
+<html>
+<head>
+    <title>My Project</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #4f46e5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello, Ferretto Edu Pro!</h1>
+        <p>Start coding your project here.</p>
+        <button onclick="alert('Welcome!')">Click Me</button>
+    </div>
+    <script>
+        console.log('Project loaded successfully!');
+    </script>
+</body>
+</html>`;
+    
+    mainEditor.setValue(defaultCode);
+    setTimeout(updatePreview, 100);
+    
+    return true;
+}
+
+/**
+ * Initialize material code editor
+ */
+function initMaterialEditor() {
+    if (typeof CodeMirror === 'undefined' || !document.getElementById('materialCodeEditor')) {
+        return false;
+    }
+
+    materialEditor = CodeMirror.fromTextArea(document.getElementById('materialCodeEditor'), {
+        mode: 'htmlmixed',
+        theme: 'monokai',
+        lineNumbers: true,
+        lineWrapping: true
+    });
+
+    return true;
+}
+
+/**
+ * Update live preview
+ */
+function updatePreview() {
+    if (!mainEditor) return;
+
+    const code = mainEditor.getValue();
+    const iframe = document.getElementById('previewFrame');
+    
+    if (!iframe) return;
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(code);
+    doc.close();
+}
+
+/**
+ * Force refresh preview
+ */
+function forceRefreshPreview() {
+    updatePreview();
+    UI.showToast('Preview Refreshed', 'info');
+}
+
+/**
+ * Reset editor to default
+ */
+function resetEditor() {
+    if (!mainEditor) return;
+
+    if (confirm('Clear editor and reset to default code?')) {
+        const defaultCode = `<!DOCTYPE html>
+<html>
+<head>
+    <title>New Project</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>New Project</h1>
+    <p>Start coding here...</p>
+</body>
+</html>`;
+        
+        mainEditor.setValue(defaultCode);
+        updatePreview();
+        UI.showToast('Editor reset to default', 'info');
+    }
+}
+
+/**
+ * Load project into editor
+ */
+function loadProjectIntoEditor(projectId) {
+    const projects = DataManager.getProjects(Auth.getCurrentUser().id);
+    const project = projects.find(p => p.id === projectId);
+    
+    if (project && mainEditor) {
+        mainEditor.setValue(project.code);
+        updatePreview();
+        UI.showToast('Project loaded into editor', 'success');
+        
+        // Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+/**
+ * Save current code as project
+ */
+function saveCurrentProject(name, visibility = 'private') {
+    const user = Auth.getCurrentUser();
+    if (!user || !mainEditor) return null;
+
+    const project = {
+        userId: user.id,
+        name: name,
+        code: mainEditor.getValue(),
+        visibility: visibility,
+        likes: 0
+    };
+
+    return DataManager.addProject(project);
+}
+
+/**
+ * Get current editor content
+ */
+function getEditorContent() {
+    return mainEditor ? mainEditor.getValue() : '';
+}
+
+/**
+ * Set editor content
+ */
+function setEditorContent(content) {
+    if (mainEditor) {
+        mainEditor.setValue(content);
+        updatePreview();
+    }
+}
+
+/**
+ * Toggle material code editor visibility
+ */
+function toggleMaterialCodeEditor() {
+    const type = document.getElementById('materialType');
+    const codeGroup = document.getElementById('materialCodeGroup');
+    const descGroup = document.getElementById('materialDescGroup');
+
+    if (!type || !codeGroup || !descGroup) return;
+
+    if (type.value === 'code') {
+        codeGroup.classList.remove('hidden');
+        descGroup.classList.add('hidden');
+        
+        // Initialize material editor if needed
+        if (!materialEditor) {
+            initMaterialEditor();
+        }
+        
+        if (materialEditor) {
+            materialEditor.refresh();
+            // Give time for DOM update
+            setTimeout(() => materialEditor.refresh(), 50);
+        }
+    } else {
+        codeGroup.classList.add('hidden');
+        descGroup.classList.remove('hidden');
+    }
+}
+
+/**
+ * Get material editor content
+ */
+function getMaterialEditorContent() {
+    return materialEditor ? materialEditor.getValue() : '';
+}
+
+/**
+ * Set material editor content
+ */
+function setMaterialEditorContent(content) {
+    if (materialEditor) {
+        materialEditor.setValue(content);
+        materialEditor.refresh();
+    }
+}
+
+// Export functions
+window.Editor = {
+    initMainEditor,
+    initMaterialEditor,
+    updatePreview,
+    forceRefreshPreview,
+    resetEditor,
+    loadProjectIntoEditor,
+    saveCurrentProject,
+    getEditorContent,
+    setEditorContent,
+    toggleMaterialCodeEditor,
+    getMaterialEditorContent,
+    setMaterialEditorContent,
+    get editor() { return mainEditor; },
+    get materialEditor() { return materialEditor; }
+};

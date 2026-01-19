@@ -1,0 +1,252 @@
+/**
+ * DATA MANAGER - Handles all data storage and retrieval
+ */
+
+const STORAGE_KEY = 'ferretto_edu_pro_v3';
+
+const defaultData = {
+    users: [
+        { id: 1, username: 'admin', password: 'admin12345', name: 'System Admin', role: 'admin', courseId: null, faceDescriptor: null },
+        { id: 2, username: 'student', password: 'student123', name: 'John Student', role: 'student', courseId: 101, faceDescriptor: null }
+    ],
+    courses: [
+        { id: 101, code: 'CS101', name: 'Introduction to Web Development', lecturer: 'Dr. Sarah Connor', schedule: 'Mon, Wed 09:00 AM', description: 'Learn HTML, CSS, and basic JavaScript.' },
+        { id: 102, code: 'CS202', name: 'Data Structures & Algorithms', lecturer: 'Prof. Alan Turing', schedule: 'Tue, Thu 11:00 AM', description: 'Deep dive into arrays, linked lists, and sorting algorithms.' },
+        { id: 103, code: 'ART105', name: 'Digital UI/UX Design', lecturer: 'Ms. Ada Lovelace', schedule: 'Fri 02:00 PM', description: 'Principles of design and usability.' }
+    ],
+    materials: [
+        { id: 1, courseId: 101, title: 'HTML5 Cheat Sheet', type: 'pdf', date: '2023-10-01', content: 'Link to external pdf...', description: 'Complete list of HTML tags.' },
+        { id: 2, courseId: 101, title: 'CSS Flexbox Example', type: 'code', date: '2023-10-05', content: '<style>...</style>', description: 'Basic centering layout using Flexbox.' }
+    ],
+    attendance: [
+        { id: 1, userId: 2, courseId: 101, date: '2023-10-24', time: '09:05:22', lat: 0, lng: 0, status: 'Present', method: 'Manual', notes: 'On time' }
+    ],
+    projects: [
+        { id: 1, userId: 2, name: 'My First Website', code: '<h1>Hello World</h1>', visibility: 'private', likes: 5, createdAt: '2023-10-20T10:00:00' }
+    ]
+};
+
+// Global state
+let appData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultData;
+
+/**
+ * Save all data to localStorage
+ */
+function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+}
+
+/**
+ * Get all users
+ */
+function getUsers() {
+    return appData.users;
+}
+
+/**
+ * Get user by ID
+ */
+function getUserById(id) {
+    return appData.users.find(user => user.id === id);
+}
+
+/**
+ * Get user by username
+ */
+function getUserByUsername(username) {
+    return appData.users.find(user => user.username === username);
+}
+
+/**
+ * Add a new user
+ */
+function addUser(user) {
+    user.id = Date.now();
+    appData.users.push(user);
+    saveData();
+    return user;
+}
+
+/**
+ * Update an existing user
+ */
+function updateUser(id, updates) {
+    const index = appData.users.findIndex(user => user.id === id);
+    if (index !== -1) {
+        appData.users[index] = { ...appData.users[index], ...updates };
+        saveData();
+        return appData.users[index];
+    }
+    return null;
+}
+
+/**
+ * Delete a user
+ */
+function deleteUser(id) {
+    appData.users = appData.users.filter(user => user.id !== id);
+    saveData();
+}
+
+/**
+ * Get all courses
+ */
+function getCourses() {
+    return appData.courses;
+}
+
+/**
+ * Get course by ID
+ */
+function getCourseById(id) {
+    return appData.courses.find(course => course.id == id);
+}
+
+/**
+ * Add a new course
+ */
+function addCourse(course) {
+    course.id = Date.now();
+    appData.courses.push(course);
+    saveData();
+    return course;
+}
+
+/**
+ * Delete a course
+ */
+function deleteCourse(id) {
+    appData.courses = appData.courses.filter(course => course.id !== id);
+    saveData();
+}
+
+/**
+ * Get materials for a course
+ */
+function getMaterials(courseId = null) {
+    if (!courseId) return appData.materials;
+    return appData.materials.filter(material => material.courseId == courseId);
+}
+
+/**
+ * Add a new material
+ */
+function addMaterial(material) {
+    material.id = Date.now();
+    material.date = new Date().toISOString().split('T')[0];
+    appData.materials.push(material);
+    saveData();
+    return material;
+}
+
+/**
+ * Delete a material
+ */
+function deleteMaterial(id) {
+    appData.materials = appData.materials.filter(material => material.id !== id);
+    saveData();
+}
+
+/**
+ * Get attendance records for a user
+ */
+function getAttendance(userId = null) {
+    if (!userId) return appData.attendance;
+    return appData.attendance.filter(record => record.userId === userId);
+}
+
+/**
+ * Add attendance record
+ */
+function addAttendance(record) {
+    record.id = Date.now();
+    appData.attendance.push(record);
+    saveData();
+    return record;
+}
+
+/**
+ * Get user projects
+ */
+function getProjects(userId = null) {
+    if (!userId) return appData.projects;
+    return appData.projects.filter(project => project.userId === userId);
+}
+
+/**
+ * Get public projects
+ */
+function getPublicProjects() {
+    return appData.projects.filter(project => project.visibility === 'public');
+}
+
+/**
+ * Add a new project
+ */
+function addProject(project) {
+    project.id = Date.now();
+    project.createdAt = new Date().toISOString();
+    project.likes = project.likes || 0;
+    appData.projects.push(project);
+    saveData();
+    return project;
+}
+
+/**
+ * Update project
+ */
+function updateProject(id, updates) {
+    const index = appData.projects.findIndex(project => project.id === id);
+    if (index !== -1) {
+        appData.projects[index] = { ...appData.projects[index], ...updates };
+        saveData();
+        return appData.projects[index];
+    }
+    return null;
+}
+
+/**
+ * Delete a project
+ */
+function deleteProject(id) {
+    appData.projects = appData.projects.filter(project => project.id !== id);
+    saveData();
+}
+
+/**
+ * Like a project
+ */
+function likeProject(id) {
+    const project = appData.projects.find(p => p.id === id);
+    if (project) {
+        project.likes = (project.likes || 0) + 1;
+        saveData();
+    }
+}
+
+// Export functions
+window.DataManager = {
+    saveData,
+    getUsers,
+    getUserById,
+    getUserByUsername,
+    addUser,
+    updateUser,
+    deleteUser,
+    getCourses,
+    getCourseById,
+    addCourse,
+    deleteCourse,
+    getMaterials,
+    addMaterial,
+    deleteMaterial,
+    getAttendance,
+    addAttendance,
+    getProjects,
+    getPublicProjects,
+    addProject,
+    updateProject,
+    deleteProject,
+    likeProject,
+    get data() { return appData; }
+};

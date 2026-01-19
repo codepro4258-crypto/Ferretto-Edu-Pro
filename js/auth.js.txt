@@ -1,0 +1,65 @@
+/**
+ * AUTHENTICATION MODULE
+ */
+
+let currentUser = null;
+
+/**
+ * Check if user is authenticated
+ */
+function checkAuth() {
+    const storedUser = sessionStorage.getItem('currentUser');
+    if (storedUser) {
+        currentUser = JSON.parse(storedUser);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Handle login
+ */
+function handleLogin(username, password) {
+    const user = DataManager.getUserByUsername(username);
+    
+    if (user && user.password === password) {
+        currentUser = user;
+        sessionStorage.setItem('currentUser', JSON.stringify(user));
+        return { success: true, user };
+    }
+    
+    return { success: false, message: 'Invalid username or password' };
+}
+
+/**
+ * Handle logout
+ */
+function handleLogout() {
+    currentUser = null;
+    sessionStorage.removeItem('currentUser');
+}
+
+/**
+ * Get current user
+ */
+function getCurrentUser() {
+    return currentUser;
+}
+
+/**
+ * Update current user in session
+ */
+function updateCurrentUser() {
+    if (currentUser) {
+        sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+    }
+}
+
+// Export functions
+window.Auth = {
+    checkAuth,
+    handleLogin,
+    handleLogout,
+    getCurrentUser,
+    updateCurrentUser
+};

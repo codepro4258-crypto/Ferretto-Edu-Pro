@@ -1,0 +1,484 @@
+/**
+ * BIOMETRIC FACE RECOGNITION MODULE
+ */
+
+const FACE_CONFIG = {
+    REG_FRAMES: 30,              // Frames to collect (Higher = cleaner data)
+    VERIFICATION_STEPS: 5,       // Consecutive high-score frames required
+    THRESHOLD: 0.85,             // Cosine similarity threshold (0.85 is very strict)
+    // Indices focused on rigid structures
+    INDICES: [
+        1, 4, 5, 6, 19, 20, 33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246,
+        61, 84, 17, 314, 405, 291, 375, 321, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95,
+        10, 109, 338, 297, 332, 284, 251, 389
+    ]
+};
+
+// Global variables
+let faceLandmarker = undefined;
+let attendanceCameraRunning = false;
+let regCameraRunning = false;
+let attendanceVerifyCounter = 0;
+let regSamples = [];
+let regUserTarget = null;
+
+// DOM Elements
+let videoAttendance, canvasAttendance, canvasCtxAttendance;
+let videoReg, canvasReg, canvasCtxReg;
+
+/**
+ * Initialize MediaPipe FaceLandmarker
+ */
+async function initMediaPipe() {
+    try {
+        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: "https://storage.googleapis.com/mediapipe/models/face_landmarker.task",
+                delegate: "GPU"
+            },
+            outputFaceBlendshapes: true,
+            outputFacialTransformationMatrixes: true,
+            numFaces: 1
+        });
+        console.log("MediaPipe FaceLandmarker initialized.");
+        return true;
+    } catch (error) {
+        console.error("Error initializing MediaPipe:", error);
+        return false;
+    }
+}
+
+/**
+ * Math: Rotation Normalization for face descriptors
+ */
+function getRotatedDescriptor(lm) {
+    // 1. Find Eye Angle
+    const leftEye = lm[33];
+    const rightEye = lm[263];
+    const dx = rightEye.x - leftEye.x;
+    const dy = rightEye.y - leftEye.y;
+    const angle = Math.atan2(dy, dx);
+
+    const cosA = Math.cos(-angle);
+    const sinA = Math.sin(-angle);
+
+    // 2. Scale Factor (Distance between eyes)
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    // 3. Center Point (Midpoint of eyes)
+    const cx = (leftEye.x + rightEye.x) / 2;
+    const cy = (leftEye.y + rightEye.y) / 2;
+
+    const vec = [];
+    for (let idx of FACE_CONFIG.INDICES) {
+        const p = lm[idx];
+        
+        // Translate to origin
+        const tx = p.x - cx;
+        const ty = p.y - cy;
+
+        // Rotate to align eyes horizontally
+        const rx = tx * cosA - ty * sinA;
+        const ry = tx * sinA + ty * cosA;
+
+        // Scale (Normalized)
+        vec.push(rx / dist);
+        vec.push(ry / dist);
+    }
+    return vec; 
+}
+
+/**
+ * Calculate cosine similarity between two vectors
+ */
+function cosineSim(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dot = 0, mA = 0, mB = 0;
+    for(let i=0; i<a.length; i++) {
+        dot += a[i]*b[i];
+        mA += a[i]*a[i];
+        mB += b[i]*b[i];
+    }
+    return dot / (Math.sqrt(mA) * Math.sqrt(mB));
+}
+
+/**
+ * Check if face is frontal
+ */
+function isFrontal(lm) {
+    const leftEar = lm[234];
+    const rightEar = lm[454];
+    const nose = lm[1];
+    const chin = lm[152];
+
+    const faceWidth = Math.abs(rightEar.x - leftEar.x);
+    const faceHeight = Math.abs(chin.y - nose.y);
+    
+    return (faceWidth / faceHeight) > 0.45;
+}
+
+/**
+ * Draw technical bounding box with info
+ */
+function drawTechBox(ctx, lm, color, text, score=null) {
+    let minX=1, maxX=0, minY=1, maxY=0;
+    lm.forEach(p => {
+        if(p.x < minX) minX = p.x;
+        if(p.x > maxX) maxX = p.x;
+        if(p.y < minY) minY = p.y;
+        if(p.y > maxY) maxY = p.y;
+    });
+    
+    const w = ctx.canvas.width; const h = ctx.canvas.height;
+    const bx = minX*w; const by = minY*h;
+    const bw = (maxX-minX)*w; const bh = (maxY-minY)*h;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // Label
+    if(text) {
+        ctx.fillStyle = color;
+        ctx.font = "bold 14px monospace";
+        let t = text;
+        if(score) t += ` [${Math.round(score*100)}%]`;
+        const textWidth = ctx.measureText(t).width;
+        
+        // Background for text
+        ctx.fillStyle = color;
+        ctx.fillRect(bx, by-24, textWidth + 10, 24);
+        
+        ctx.fillStyle = "#000";
+        ctx.fillText(t, bx+5, by-6);
+    }
+}
+
+/**
+ * ATTENDANCE FUNCTIONS
+ */
+
+/**
+ * Start attendance scanner
+ */
+async function startAttendanceScanner() {
+    if (!faceLandmarker) {
+        throw new Error("AI Model not ready yet.");
+    }
+
+    const user = Auth.getCurrentUser();
+    if (!user.faceDescriptor) {
+        throw new Error("Face ID not registered. Please contact admin.");
+    }
+
+    return new Promise((resolve, reject) => {
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        await runAttendanceCamera(position.coords, user);
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
+                },
+                (error) => {
+                    reject(new Error("Location access denied."));
+                }
+            );
+        } else {
+            reject(new Error("Geolocation not supported."));
+        }
+    });
+}
+
+/**
+ * Run attendance camera
+ */
+async function runAttendanceCamera(coords, user) {
+    videoAttendance = document.getElementById('attendanceVideo');
+    canvasAttendance = document.getElementById('attendanceCanvas');
+    canvasCtxAttendance = canvasAttendance.getContext('2d');
+    
+    attendanceVerifyCounter = 0;
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480 } 
+        });
+        videoAttendance.srcObject = stream;
+        attendanceCameraRunning = true;
+        
+        return new Promise((resolve) => {
+            videoAttendance.addEventListener('loadeddata', () => {
+                canvasAttendance.width = videoAttendance.videoWidth;
+                canvasAttendance.height = videoAttendance.videoHeight;
+                detectFaceForAttendance(coords, user, resolve);
+            });
+        });
+    } catch (err) {
+        throw new Error("Camera access denied.");
+    }
+}
+
+/**
+ * Detect face for attendance
+ */
+async function detectFaceForAttendance(coords, user, resolve) {
+    if (!attendanceCameraRunning) return;
+
+    const results = await faceLandmarker.detectForVideo(videoAttendance, performance.now());
+    
+    canvasCtxAttendance.save();
+    canvasCtxAttendance.clearRect(0, 0, canvasAttendance.width, canvasAttendance.height);
+    canvasCtxAttendance.drawImage(results.image, 0, 0, canvasAttendance.width, canvasAttendance.height);
+    canvasCtxAttendance.restore();
+
+    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+        const landmarks = results.faceLandmarks[0];
+        const currentEmbedding = getRotatedDescriptor(landmarks);
+        const storedEmbedding = user.faceDescriptor;
+
+        const score = cosineSim(currentEmbedding, storedEmbedding);
+        const frontal = isFrontal(landmarks);
+
+        // HUD Updates
+        const hudStatus = document.getElementById('attHudStatus');
+        const hudAlign = document.getElementById('attHudAlign');
+        if (hudStatus) hudStatus.innerText = `SCORE: ${Math.round(score*100)}%`;
+        if (hudAlign) hudAlign.innerText = frontal ? "FRONTAL" : "TURNED";
+        
+        let boxColor = '#ef4444'; // Default Red
+        let statusText = "Verifying...";
+        
+        if (score > FACE_CONFIG.THRESHOLD && frontal) {
+            attendanceVerifyCounter++;
+            boxColor = '#22c55e'; // Green
+            statusText = `Confirming (${attendanceVerifyCounter}/${FACE_CONFIG.VERIFICATION_STEPS})`;
+            
+            if (attendanceVerifyCounter >= FACE_CONFIG.VERIFICATION_STEPS) { 
+                markAttendanceSuccess(coords, user);
+                stopAttendanceScanner();
+                resolve();
+                return; 
+            }
+        } else {
+            attendanceVerifyCounter = 0;
+            boxColor = score > 0.6 ? '#eab308' : '#ef4444';
+            statusText = score < 0.6 ? "Unknown" : "Align Face";
+        }
+
+        drawTechBox(canvasCtxAttendance, landmarks, boxColor, statusText, score);
+
+    } else {
+        attendanceVerifyCounter = 0;
+        const hudStatus = document.getElementById('attHudStatus');
+        const hudAlign = document.getElementById('attHudAlign');
+        if (hudStatus) hudStatus.innerText = "STATUS: NO FACE";
+        if (hudAlign) hudAlign.innerText = "ALIGN: --";
+    }
+
+    requestAnimationFrame(() => detectFaceForAttendance(coords, user, resolve));
+}
+
+/**
+ * Mark attendance success
+ */
+function markAttendanceSuccess(coords, user) {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0];
+
+    // Check if already marked today
+    const existing = DataManager.getAttendance(user.id).find(a => a.date === dateStr);
+    if (existing) {
+        throw new Error("Attendance already marked for today.");
+    }
+
+    DataManager.addAttendance({
+        userId: user.id,
+        courseId: user.courseId,
+        date: dateStr,
+        time: timeStr,
+        lat: coords.latitude,
+        lng: coords.longitude,
+        status: 'Present',
+        method: 'Face Scan (Precision)',
+        notes: 'Verified via FaceSafe Ultra Engine'
+    });
+
+    attendanceVerifyCounter = 0;
+}
+
+/**
+ * Stop attendance scanner
+ */
+function stopAttendanceScanner() {
+    attendanceCameraRunning = false;
+    if (videoAttendance && videoAttendance.srcObject) {
+        videoAttendance.srcObject.getTracks().forEach(track => track.stop());
+        videoAttendance.srcObject = null;
+    }
+    
+    if (canvasCtxAttendance) {
+        canvasCtxAttendance.clearRect(0, 0, canvasAttendance.width, canvasAttendance.height);
+    }
+    
+    attendanceVerifyCounter = 0;
+}
+
+/**
+ * REGISTRATION FUNCTIONS
+ */
+
+/**
+ * Start face registration for a user
+ */
+async function startFaceRegistration(userId) {
+    regUserTarget = DataManager.getUserById(userId);
+    if (!regUserTarget) {
+        throw new Error("User not found");
+    }
+
+    regSamples = [];
+    return new Promise((resolve, reject) => {
+        openRegistrationModal();
+        resolve();
+    });
+}
+
+/**
+ * Open registration modal and start camera
+ */
+async function openRegistrationModal() {
+    if (!faceLandmarker) {
+        throw new Error("AI Model not ready.");
+    }
+
+    videoReg = document.getElementById('regVideo');
+    canvasReg = document.getElementById('regCanvas');
+    canvasCtxReg = canvasReg.getContext('2d');
+
+    regSamples = [];
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480 } 
+        });
+        videoReg.srcObject = stream;
+        regCameraRunning = true;
+
+        videoReg.addEventListener('loadeddata', () => {
+            canvasReg.width = videoReg.videoWidth;
+            canvasReg.height = videoReg.videoHeight;
+            captureRegistrationLoop();
+        });
+    } catch (err) {
+        throw new Error("Camera access denied.");
+    }
+}
+
+/**
+ * Capture registration loop
+ */
+async function captureRegistrationLoop() {
+    if (!regCameraRunning) return;
+
+    const results = await faceLandmarker.detectForVideo(videoReg, performance.now());
+    
+    canvasCtxReg.clearRect(0, 0, canvasReg.width, canvasReg.height);
+    canvasCtxReg.drawImage(results.image, 0, 0, canvasReg.width, canvasReg.height);
+
+    // FPS Counter
+    const hudFps = document.getElementById('regHudFps');
+    if (hudFps) hudFps.innerText = "FPS: " + Math.round(1000 / (performance.now() - (window.lastRegTime || performance.now())));
+    window.lastRegTime = performance.now();
+
+    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+        const landmarks = results.faceLandmarks[0];
+        const frontal = isFrontal(landmarks);
+        
+        const hudAlign = document.getElementById('regHudAlign');
+        if (hudAlign) {
+            hudAlign.innerText = frontal ? "ALIGN: GOOD" : "ALIGN: TURN";
+            hudAlign.style.color = frontal ? "var(--success)" : "var(--danger)";
+        }
+
+        drawTechBox(canvasCtxReg, landmarks, frontal ? '#4f46e5' : '#ef4444', frontal ? "LOCKED" : "ALIGN");
+
+        if (frontal) {
+            // Collect Data
+            if (regSamples.length < FACE_CONFIG.REG_FRAMES) {
+                if(Math.random() > 0.2) {
+                    regSamples.push(getRotatedDescriptor(landmarks));
+                }
+                
+                const pct = Math.round((regSamples.length / FACE_CONFIG.REG_FRAMES) * 100);
+                const progressBar = document.getElementById('regProgressBar');
+                if (progressBar) progressBar.style.width = `${pct}%`;
+            }
+
+            if (regSamples.length >= FACE_CONFIG.REG_FRAMES) {
+                finishRegistration();
+                return;
+            }
+        }
+    }
+
+    requestAnimationFrame(captureRegistrationLoop);
+}
+
+/**
+ * Finish registration process
+ */
+function finishRegistration() {
+    stopRegistrationProcess();
+    
+    // Average the vectors
+    const len = regSamples[0].length;
+    const avg = new Array(len).fill(0);
+    regSamples.forEach(v => {
+        for(let i=0; i<len; i++) avg[i] += v[i];
+    });
+    for(let i=0; i<len; i++) avg[i] /= regSamples.length;
+
+    // Update user face descriptor
+    DataManager.updateUser(regUserTarget.id, { faceDescriptor: avg });
+    
+    // Update preview image
+    canvasReg.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const preview = document.getElementById('regFacePreview');
+        if (preview) {
+            preview.src = url;
+            preview.classList.remove('hidden');
+        }
+        const icon = document.getElementById('regFaceIcon');
+        if (icon) icon.classList.add('hidden');
+    });
+
+    regSamples = [];
+}
+
+/**
+ * Stop registration process
+ */
+function stopRegistrationProcess() {
+    regCameraRunning = false;
+    if (videoReg && videoReg.srcObject) {
+        videoReg.srcObject.getTracks().forEach(track => track.stop());
+        videoReg.srcObject = null;
+    }
+    regSamples = [];
+}
+
+// Export functions
+window.Biometric = {
+    initMediaPipe,
+    startAttendanceScanner,
+    stopAttendanceScanner,
+    startFaceRegistration,
+    stopRegistrationProcess,
+    get isReady() { return faceLandmarker !== undefined; }
+};

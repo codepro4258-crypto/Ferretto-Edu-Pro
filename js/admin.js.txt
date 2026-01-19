@@ -1,0 +1,781 @@
+/**
+ * MAIN APPLICATION MODULE
+ */
+
+// Global state
+let currentSection = 'overview';
+
+/**
+ * Initialize application
+ */
+async function initApp() {
+    try {
+        // Check authentication
+        if (Auth.checkAuth()) {
+            showDashboard();
+        } else {
+            showLogin();
+        }
+
+        // Initialize MediaPipe
+        const mediaPipeReady = await Biometric.initMediaPipe();
+        if (!mediaPipeReady) {
+            UI.showToast("AI Model failed to load. Biometric features unavailable.", "warning");
+        }
+
+        // Initialize code editor
+        const editorReady = Editor.initMainEditor();
+        if (!editorReady) {
+            UI.showToast("Code editor disabled: Libraries blocked.", "warning");
+        }
+
+        // Setup event listeners
+        setupEventListeners();
+
+        // Load dashboard components
+        loadDashboardComponents();
+
+        console.log("Ferretto Edu Pro v3.0 initialized successfully");
+    } catch (error) {
+        console.error("Error initializing app:", error);
+        UI.showToast("Failed to initialize application", "error");
+    }
+}
+
+/**
+ * Setup event listeners
+ */
+function setupEventListeners() {
+    // Login form
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLoginSubmit);
+    }
+
+    // Logout button
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
+
+    // Mobile menu button
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', UI.toggleSidebar);
+    }
+
+    // Menu items
+    document.addEventListener('click', (e) => {
+        const menuItem = e.target.closest('.menu-item');
+        if (menuItem) {
+            e.preventDefault();
+            const section = menuItem.getAttribute('data-section');
+            showSection(section);
+            document.getElementById('sidebar').classList.remove('mobile-open');
+        }
+    });
+
+    // Modal close buttons
+    document.addEventListener('click', (e) => {
+        if (e.target.classList.contains('close-modal') || 
+            e.target.classList.contains('modal-overlay')) {
+            const modal = e.target.closest('.modal-overlay');
+            if (modal) {
+                UI.closeModal(modal.id);
+            }
+        }
+    });
+
+    // Form submissions
+    const userForm = document.getElementById('userForm');
+    if (userForm) {
+        userForm.addEventListener('submit', Admin.handleSaveUser);
+    }
+
+    const courseForm = document.getElementById('courseForm');
+    if (courseForm) {
+        courseForm.addEventListener('submit', Admin.handleSaveCourse);
+    }
+
+    const materialForm = document.getElementById('materialForm');
+    if (materialForm) {
+        materialForm.addEventListener('submit', Admin.handleSaveMaterial);
+    }
+
+    const projectForm = document.getElementById('projectForm');
+    if (projectForm) {
+        projectForm.addEventListener('submit', handleSaveProject);
+    }
+
+    // Material type change
+    const materialType = document.getElementById('materialType');
+    if (materialType) {
+        materialType.addEventListener('change', Editor.toggleMaterialCodeEditor);
+    }
+}
+
+/**
+ * Handle login form submission
+ */
+async function handleLoginSubmit(e) {
+    e.preventDefault();
+    
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+
+    UI.showLoading();
+    
+    try {
+        const result = Auth.handleLogin(username, password);
+        
+        if (result.success) {
+            UI.showToast('Login Successful!', 'success');
+            showDashboard();
+        } else {
+            UI.showToast(result.message, 'error');
+        }
+    } catch (error) {
+        UI.showToast('Login failed: ' + error.message, 'error');
+    } finally {
+        UI.hideLoading();
+    }
+}
+
+/**
+ * Handle logout
+ */
+function handleLogout() {
+    Auth.handleLogout();
+    showLogin();
+    UI.showToast('Logged out successfully', 'info');
+}
+
+/**
+ * Show login page
+ */
+function showLogin() {
+    document.getElementById('loginPage').style.display = 'flex';
+    document.getElementById('dashboardPage').classList.remove('active');
+    document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+}
+
+/**
+ * Show dashboard
+ */
+function showDashboard() {
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('dashboardPage').classList.add('active');
+    
+    const user = Auth.getCurrentUser();
+    if (!user) {
+        showLogin();
+        return;
+    }
+
+    // Update user info
+    document.getElementById('userName').textContent = user.name;
+    document.getElementById('userRole').textContent = user.role.toUpperCase();
+    document.getElementById('userAvatar').textContent = user.name.charAt(0);
+    document.getElementById('welcomeName').textContent = user.name;
+
+    // Show/hide admin menu items
+    if (user.role === 'admin') {
+        document.getElementById('adminCategory').style.display = 'block';
+        document.getElementById('adminUsersLink').style.display = 'flex';
+        document.getElementById('adminCoursesLink').style.display = 'flex';
+        document.getElementById('adminMaterialsLink').style.display = 'flex';
+    }
+
+    // Show overview section by default
+    showSection('overview');
+}
+
+/**
+ * Load dashboard components
+ */
+async function loadDashboardComponents() {
+    try {
+        // Load sidebar
+        const sidebarResponse = await fetch('components/sidebar.html');
+        const sidebarHtml = await sidebarResponse.text();
+        
+        const dashboardPage = document.getElementById('dashboardPage');
+        if (dashboardPage) {
+            dashboardPage.innerHTML = `
+                <nav class="top-nav">
+                    <div class="top-nav-content">
+                        <a href="#" class="nav-brand" onclick="showSection('overview')">
+                            <div class="logo-sm logo"><i class="fas fa-graduation-cap"></i></div>
+                            Ferretto Edu Pro
+                        </a>
+                        <div class="nav-user">
+                            <div class="hidden-mobile" style="text-align: right; margin-right: 10px;">
+                                <div class="text-sm font-bold" id="userName">User</div>
+                                <div class="text-xs text-gray" id="userRole">Role</div>
+                            </div>
+                            <div class="user-avatar" id="userAvatar">U</div>
+                            <button class="btn btn-outline btn-sm" id="logoutBtn" title="Logout">
+                                <i class="fas fa-power-off"></i>
+                            </button>
+                            <button class="btn btn-outline btn-sm hidden-desktop" id="mobileMenuBtn">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                        </div>
+                    </div>
+                </nav>
+                ${sidebarHtml}
+                <main class="main-content" id="mainContent"></main>
+            `;
+        }
+
+        // Load modals
+        const modalsResponse = await fetch('components/modals.html');
+        const modalsHtml = await modalsResponse.text();
+        
+        const componentsContainer = document.getElementById('components-container');
+        if (componentsContainer) {
+            componentsContainer.innerHTML = modalsHtml;
+        }
+
+        // Load sections
+        await loadContentSections();
+
+    } catch (error) {
+        console.error("Error loading components:", error);
+        UI.showToast("Failed to load dashboard components", "error");
+    }
+}
+
+/**
+ * Load content sections
+ */
+async function loadContentSections() {
+    const sections = [
+        'overview',
+        'studyMaterials',
+        'projects',
+        'attendance',
+        'leaderboard',
+        'adminUsers',
+        'adminCourses',
+        'adminMaterials'
+    ];
+
+    const mainContent = document.getElementById('mainContent');
+    if (!mainContent) return;
+
+    // Load each section
+    for (const section of sections) {
+        try {
+            const response = await fetch(`sections/${section}.html`);
+            const html = await response.text();
+            
+            const sectionDiv = document.createElement('div');
+            sectionDiv.className = `content-section ${section === 'overview' ? 'active' : ''}`;
+            sectionDiv.id = section;
+            sectionDiv.innerHTML = html;
+            
+            mainContent.appendChild(sectionDiv);
+        } catch (error) {
+            console.error(`Error loading section ${section}:`, error);
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'content-section';
+            errorDiv.id = section;
+            errorDiv.innerHTML = `<div class="empty-state"><p>Error loading ${section} section</p></div>`;
+            mainContent.appendChild(errorDiv);
+        }
+    }
+}
+
+/**
+ * Show section
+ */
+function showSection(sectionId) {
+    // Stop any running cameras
+    if (Biometric) {
+        // Biometric.stopAttendanceScanner();
+        // Biometric.stopRegistrationProcess();
+    }
+
+    // Check admin access
+    if (sectionId.startsWith('admin')) {
+        const user = Auth.getCurrentUser();
+        if (!user || user.role !== 'admin') {
+            UI.showToast('Access Denied: Admins only', 'error');
+            return;
+        }
+    }
+
+    // Update active menu item
+    document.querySelectorAll('.menu-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.getAttribute('data-section') === sectionId) {
+            item.classList.add('active');
+        }
+    });
+
+    // Show section
+    document.querySelectorAll('.content-section').forEach(section => {
+        section.classList.remove('active');
+        if (section.id === sectionId) {
+            section.classList.add('active');
+            currentSection = sectionId;
+            
+            // Load section-specific data
+            loadSectionData(sectionId);
+        }
+    });
+
+    // Update page title
+    const sectionTitles = {
+        'overview': 'Dashboard',
+        'studyMaterials': 'Study Materials',
+        'projects': 'Code Playground',
+        'attendance': 'Attendance',
+        'leaderboard': 'Leaderboard',
+        'adminUsers': 'User Management',
+        'adminCourses': 'Course Management',
+        'adminMaterials': 'Materials Library'
+    };
+    
+    UI.updatePageTitle(sectionTitles[sectionId] || 'Dashboard');
+}
+
+/**
+ * Load section data
+ */
+function loadSectionData(sectionId) {
+    switch (sectionId) {
+        case 'overview':
+            loadDashboardOverview();
+            break;
+        case 'studyMaterials':
+            loadStudyMaterials();
+            break;
+        case 'projects':
+            loadProjects();
+            break;
+        case 'attendance':
+            loadAttendance();
+            break;
+        case 'leaderboard':
+            loadLeaderboard();
+            break;
+        case 'adminUsers':
+            Admin.loadAdminUsers();
+            break;
+        case 'adminCourses':
+            Admin.loadAdminCourses();
+            break;
+        case 'adminMaterials':
+            Admin.loadAdminMaterials();
+            break;
+    }
+}
+
+/**
+ * Load dashboard overview
+ */
+function loadDashboardOverview() {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+
+    // Update stats
+    const userProjects = DataManager.getProjects(user.id);
+    document.getElementById('statProjects').textContent = userProjects.length;
+    
+    const totalLikes = userProjects.reduce((sum, p) => sum + (p.likes || 0), 0);
+    document.getElementById('statLikes').textContent = totalLikes;
+
+    if (user.courseId) {
+        const course = DataManager.getCourseById(user.courseId);
+        if (course) {
+            document.getElementById('statCourseName').textContent = course.name;
+            document.getElementById('statCourseCode').textContent = course.code;
+        }
+    }
+
+    const attendance = DataManager.getAttendance(user.id);
+    const present = attendance.filter(a => a.status === 'Present').length;
+    const rate = attendance.length > 0 ? Math.round((present / attendance.length) * 100) : 0;
+    document.getElementById('statAttendance').textContent = rate + '%';
+
+    // Load recent activity
+    const tbody = document.getElementById('recentActivityTable');
+    if (tbody) {
+        tbody.innerHTML = '';
+        const recentAtt = attendance.slice(-3).reverse();
+        
+        if (recentAtt.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray">No recent activity</td></tr>';
+        } else {
+            recentAtt.forEach(r => {
+                const course = DataManager.getCourseById(r.courseId);
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${r.date} ${r.time || ''}</td>
+                        <td>Attendance</td>
+                        <td>${course ? course.name : 'General'}</td>
+                        <td><span class="badge ${r.status === 'Present' ? 'badge-success' : 'badge-danger'}">${r.status}</span></td>
+                    </tr>
+                `;
+            });
+        }
+    }
+}
+
+/**
+ * Load study materials
+ */
+function loadStudyMaterials() {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+
+    const container = document.getElementById('materialContainer');
+    if (!container) return;
+
+    let materials = [];
+    
+    if (user.role === 'admin') {
+        materials = DataManager.getMaterials();
+    } else if (user.courseId) {
+        materials = DataManager.getMaterials(user.courseId);
+    }
+
+    if (materials.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>No materials available.</p></div>';
+        return;
+    }
+
+    container.innerHTML = '';
+    materials.forEach(material => {
+        const course = DataManager.getCourseById(material.courseId);
+        const el = document.createElement('div');
+        el.className = 'material-item';
+        
+        let iconClass = 'icon-code', faIcon = 'fa-code';
+        if (material.type === 'pdf') { iconClass = 'icon-pdf'; faIcon = 'fa-file-pdf'; }
+        if (material.type === 'doc') { iconClass = 'icon-doc'; faIcon = 'fa-file-word'; }
+
+        let contentHtml = '';
+        if (material.type === 'code') {
+            contentHtml = `
+                <div class="code-snippet-view">
+                    <div class="code-actions">
+                        <button class="code-btn" onclick="copyMaterialCode(${material.id})">
+                            <i class="fas fa-copy"></i> Copy
+                        </button>
+                    </div>
+                    <pre><code>${UI.escapeHtml(material.content)}</code></pre>
+                </div>`;
+        } else {
+            contentHtml = `<p class="text-sm mt-2 text-gray">${material.description || 'Click download to access file.'}</p>`;
+        }
+
+        el.innerHTML = `
+            <div class="material-icon ${iconClass}"><i class="fas ${faIcon}"></i></div>
+            <div class="material-content">
+                <div class="material-title">${material.title}</div>
+                <div class="material-meta">
+                    <span>${course ? course.name : 'General'}</span>
+                    <span>&bull;</span>
+                    <span>${material.date}</span>
+                </div>
+                ${contentHtml}
+            </div>
+        `;
+        container.appendChild(el);
+    });
+}
+
+/**
+ * Copy material code to clipboard
+ */
+function copyMaterialCode(materialId) {
+    const materials = DataManager.getMaterials();
+    const material = materials.find(m => m.id == materialId);
+    if (material && material.content) {
+        UI.copyToClipboard(material.content);
+    }
+}
+
+/**
+ * Load projects
+ */
+function loadProjects() {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+
+    const grid = document.getElementById('myProjectsGrid');
+    if (!grid) return;
+
+    const projects = DataManager.getProjects(user.id).reverse();
+    
+    if (projects.length === 0) {
+        grid.innerHTML = '<div class="empty-state w-full"><i class="fas fa-laptop-code"></i><p>No projects yet.</p></div>';
+        return;
+    }
+
+    grid.innerHTML = '';
+    projects.forEach(project => {
+        const isPublic = project.visibility === 'public';
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+            <div class="card-header">
+                <div>
+                    <div class="card-title">${project.name}</div>
+                    <div class="card-subtitle">${UI.formatDate(project.createdAt)}</div>
+                </div>
+                <span class="badge ${isPublic ? 'badge-success' : 'badge-gray'}">${isPublic ? 'Public' : 'Private'}</span>
+            </div>
+            <div class="card-body">
+                <p class="text-xs text-gray">Likes: ${project.likes || 0}</p>
+            </div>
+            <div class="card-footer">
+                <div class="flex gap-2">
+                    <button class="btn btn-sm btn-primary" onclick="loadProjectIntoEditor(${project.id})">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                    <button class="btn btn-sm ${isPublic ? 'btn-warning' : 'btn-success'}" onclick="toggleProjectVisibility(${project.id})">
+                        <i class="fas ${isPublic ? 'fa-eye-slash' : 'fa-globe'}"></i> 
+                        ${isPublic ? 'Make Private' : 'Make Public'}
+                    </button>
+                </div>
+                <button class="btn btn-sm btn-danger" onclick="deleteProject(${project.id})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+/**
+ * Load project into editor
+ */
+function loadProjectIntoEditor(projectId) {
+    const projects = DataManager.getProjects(Auth.getCurrentUser().id);
+    const project = projects.find(p => p.id === projectId);
+    
+    if (project) {
+        Editor.setEditorContent(project.code);
+        UI.showToast('Project loaded into editor', 'success');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+
+/**
+ * Toggle project visibility
+ */
+function toggleProjectVisibility(projectId) {
+    const project = DataManager.getProjects(Auth.getCurrentUser().id).find(p => p.id === projectId);
+    if (project) {
+        const newVisibility = project.visibility === 'public' ? 'private' : 'public';
+        
+        // Update project
+        const updatedProjects = DataManager.data.projects.map(p => 
+            p.id === projectId ? { ...p, visibility: newVisibility } : p
+        );
+        DataManager.data.projects = updatedProjects;
+        DataManager.saveData();
+        
+        UI.showToast(`Project is now ${newVisibility}`, 'success');
+        loadProjects();
+    }
+}
+
+/**
+ * Delete project
+ */
+function deleteProject(projectId) {
+    if (!confirm('Delete this project?')) return;
+    
+    DataManager.deleteProject(projectId);
+    UI.showToast('Project deleted', 'info');
+    loadProjects();
+}
+
+/**
+ * Open project save modal
+ */
+function openProjectModal() {
+    const projectNameInput = document.getElementById('projectNameInput');
+    if (projectNameInput) {
+        projectNameInput.value = `Project ${new Date().toLocaleDateString()}`;
+    }
+    UI.openModal('projectModal');
+}
+
+/**
+ * Handle save project
+ */
+function handleSaveProject(e) {
+    e.preventDefault();
+    
+    const name = document.getElementById('projectNameInput').value.trim();
+    const visibility = document.getElementById('projectVisibilityInput').value;
+    
+    if (!name) {
+        UI.showToast('Please enter a project name', 'error');
+        return;
+    }
+    
+    const project = Editor.saveCurrentProject(name, visibility);
+    if (project) {
+        UI.closeModal('projectModal');
+        UI.showToast('Project Saved Successfully!', 'success');
+        loadProjects();
+        e.target.reset();
+    }
+}
+
+/**
+ * Load attendance
+ */
+function loadAttendance() {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+
+    const tbody = document.getElementById('fullAttendanceTable');
+    if (!tbody) return;
+
+    const attendance = DataManager.getAttendance(user.id).reverse();
+    
+    if (attendance.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center">No records found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    attendance.forEach(record => {
+        const course = DataManager.getCourseById(record.courseId);
+        const locStr = (record.lat && record.lng) ? 
+            `${record.lat.toFixed(4)}, ${record.lng.toFixed(4)}` : 'N/A';
+        
+        tbody.innerHTML += `
+            <tr>
+                <td>${record.date} <span class="text-xs text-gray block">${record.time}</span></td>
+                <td>${course ? course.name : 'Unknown'}</td>
+                <td>${locStr}</td>
+                <td><span class="badge badge-info">${record.method}</span></td>
+                <td><span class="badge badge-success">${record.status}</span></td>
+            </tr>
+        `;
+    });
+}
+
+/**
+ * Start attendance scanner
+ */
+async function startAttendanceScanner() {
+    UI.showLoading();
+    
+    try {
+        await Biometric.startAttendanceScanner();
+        UI.showToast('Attendance marked successfully!', 'success');
+        loadAttendance();
+    } catch (error) {
+        UI.showToast(error.message, 'error');
+    } finally {
+        UI.hideLoading();
+    }
+}
+
+/**
+ * Stop attendance scanner
+ */
+function stopAttendanceScanner() {
+    Biometric.stopAttendanceScanner();
+    UI.showToast('Attendance scanner stopped', 'info');
+}
+
+/**
+ * Load leaderboard
+ */
+function loadLeaderboard(filter = 'trending') {
+    const grid = document.getElementById('leaderboardGrid');
+    if (!grid) return;
+
+    let projects = DataManager.getPublicProjects();
+    
+    if (filter === 'trending') {
+        projects.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+    } else if (filter === 'recent') {
+        projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    if (projects.length === 0) {
+        grid.innerHTML = '<div class="empty-state w-full"><i class="fas fa-globe"></i><p>No public projects yet.</p></div>';
+        return;
+    }
+
+    grid.innerHTML = '';
+    projects.forEach(project => {
+        const user = DataManager.getUserById(project.userId);
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-title">${project.name}</div>
+                <div class="text-xs text-primary"><i class="fas fa-heart"></i> ${project.likes || 0} Likes</div>
+            </div>
+            <div class="card-body">
+                <p class="text-sm">by ${user ? user.name : 'Unknown'}</p>
+                <p class="text-xs text-gray">${UI.formatDate(project.createdAt)}</p>
+            </div>
+            <div class="card-footer">
+                <button class="btn btn-sm btn-primary" onclick="runPublicProject(${project.id})">
+                    <i class="fas fa-play"></i> Run
+                </button>
+                <button class="btn btn-sm btn-outline" onclick="likePublicProject(${project.id})">
+                    <i class="fas fa-thumbs-up"></i> Like
+                </button>
+            </div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+/**
+ * Run public project
+ */
+function runPublicProject(projectId) {
+    const projects = DataManager.getPublicProjects();
+    const project = projects.find(p => p.id === projectId);
+    
+    if (project) {
+        const win = window.open('', '_blank');
+        win.document.write(project.code);
+        win.document.close();
+    }
+}
+
+/**
+ * Like public project
+ */
+function likePublicProject(projectId) {
+    DataManager.likeProject(projectId);
+    UI.showToast('Liked!', 'success');
+    loadLeaderboard('trending');
+}
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', initApp);
+
+// Export functions to global scope
+window.showSection = showSection;
+window.startAttendanceScanner = startAttendanceScanner;
+window.stopAttendanceScanner = stopAttendanceScanner;
+window.resetEditor = Editor.resetEditor;
+window.forceRefreshPreview = Editor.forceRefreshPreview;
+window.openProjectModal = openProjectModal;
+window.loadProjectIntoEditor = loadProjectIntoEditor;
+window.toggleProjectVisibility = toggleProjectVisibility;
+window.deleteProject = deleteProject;
+window.runPublicProject = runPublicProject;
+window.likePublicProject = likePublicProject;
+window.copyMaterialCode = copyMaterialCode;
+window.openUserModal = () => Admin.openUserModal();
+window.openCourseModal = () => Admin.openCourseModal();
+window.openMaterialModal = () => Admin.openMaterialModal();

@@ -1,0 +1,209 @@
+/**
+ * UI UTILITIES MODULE
+ */
+
+/**
+ * Show toast notification
+ */
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    if (!container) {
+        console.warn('Toast container not found');
+        return;
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    let icon = 'fa-check-circle';
+    if (type === 'error') icon = 'fa-exclamation-circle';
+    if (type === 'warning') icon = 'fa-exclamation-triangle';
+    if (type === 'info') icon = 'fa-info-circle';
+
+    toast.innerHTML = `<i class="fas ${icon}"></i> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    // Remove toast after 3 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideInRight 0.3s ease reverse';
+        setTimeout(() => {
+            if (toast.parentNode === container) {
+                container.removeChild(toast);
+            }
+        }, 300);
+    }, 3000);
+}
+
+/**
+ * Open modal by ID
+ */
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('open');
+        document.body.style.overflow = 'hidden'; // Prevent scrolling
+    }
+}
+
+/**
+ * Close modal by ID
+ */
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('open');
+        document.body.style.overflow = ''; // Restore scrolling
+    }
+}
+
+/**
+ * Toggle sidebar on mobile
+ */
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.classList.toggle('mobile-open');
+    }
+}
+
+/**
+ * Show loading overlay
+ */
+function showLoading() {
+    let loader = document.getElementById('loadingOverlay');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'loadingOverlay';
+        loader.className = 'loading-overlay';
+        loader.innerHTML = '<div class="loading-spinner"></div>';
+        document.body.appendChild(loader);
+    }
+    loader.style.display = 'flex';
+}
+
+/**
+ * Hide loading overlay
+ */
+function hideLoading() {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) {
+        loader.style.display = 'none';
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Format date
+ */
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+
+/**
+ * Format time
+ */
+function formatTime(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+/**
+ * Copy text to clipboard
+ */
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(
+        () => showToast('Copied to clipboard', 'success'),
+        () => showToast('Failed to copy', 'error')
+    );
+}
+
+/**
+ * Create user avatar element
+ */
+function createUserAvatar(name, size = 40) {
+    const avatar = document.createElement('div');
+    avatar.className = 'user-avatar';
+    avatar.style.width = `${size}px`;
+    avatar.style.height = `${size}px`;
+    avatar.style.fontSize = `${size * 0.4}px`;
+    avatar.textContent = name.charAt(0).toUpperCase();
+    return avatar;
+}
+
+/**
+ * Update page title
+ */
+function updatePageTitle(title) {
+    document.title = `${title} - Ferretto Edu Pro v3.0`;
+}
+
+/**
+ * Scroll to element smoothly
+ */
+function scrollToElement(elementId, offset = 0) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        const elementPosition = element.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - offset;
+
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+        });
+    }
+}
+
+/**
+ * Create badge element
+ */
+function createBadge(text, type = 'primary') {
+    const badge = document.createElement('span');
+    badge.className = `badge badge-${type}`;
+    badge.textContent = text;
+    return badge;
+}
+
+/**
+ * Create button element
+ */
+function createButton(text, type = 'primary', size = '', icon = '') {
+    const button = document.createElement('button');
+    button.className = `btn btn-${type} ${size ? 'btn-' + size : ''}`;
+    button.innerHTML = icon ? `<i class="fas fa-${icon}"></i> ${text}` : text;
+    return button;
+}
+
+// Export functions
+window.UI = {
+    showToast,
+    openModal,
+    closeModal,
+    toggleSidebar,
+    showLoading,
+    hideLoading,
+    escapeHtml,
+    formatDate,
+    formatTime,
+    copyToClipboard,
+    createUserAvatar,
+    updatePageTitle,
+    scrollToElement,
+    createBadge,
+    createButton
+};
